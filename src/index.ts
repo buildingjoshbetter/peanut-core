@@ -7,6 +7,13 @@ import {
   ingestGmailMessages,
   ingestIMessages,
 } from './ingestion/pipeline';
+import {
+  processUnprocessedMessages,
+  extractBasicPatterns,
+  extractFromMessage,
+} from './extraction/extractor';
+import type { LLMConfig } from './extraction/llm';
+import type { ExtractionResult } from './extraction/types';
 import type { GmailMessage, IMessageMessage, BatchIngestResult } from './ingestion/types';
 import type {
   PeanutConfig,
@@ -23,6 +30,7 @@ import type {
 
 export * from './types';
 export * from './ingestion/types';
+// Note: extraction/types not re-exported to avoid conflicts with types.ts
 
 export class PeanutCore {
   private config: PeanutConfig;
@@ -73,6 +81,49 @@ export class PeanutCore {
   async ingestIMessages(messages: IMessageMessage[]): Promise<BatchIngestResult> {
     this.ensureInitialized();
     return ingestIMessages(messages, this.config.userPhone, this.config.userEmail);
+  }
+
+  // ============================================================
+  // EXTRACTION
+  // ============================================================
+
+  /**
+   * Process unprocessed messages through LLM extraction pipeline
+   * Extracts entities, facts, and relationships
+   */
+  async runExtraction(llmConfig: LLMConfig, batchSize: number = 10): Promise<{
+    processed: number;
+    assertionsCreated: number;
+    relationshipsCreated: number;
+    errors: number;
+  }> {
+    this.ensureInitialized();
+    return processUnprocessedMessages(llmConfig, batchSize);
+  }
+
+  /**
+   * Extract entities, facts, and relationships from a single text
+   */
+  async extractFromText(
+    text: string,
+    sender: string,
+    recipients: string[],
+    llmConfig: LLMConfig
+  ): Promise<ExtractionResult> {
+    this.ensureInitialized();
+    return extractFromMessage(text, sender, recipients, llmConfig);
+  }
+
+  /**
+   * Extract basic patterns without LLM (emails, phones, URLs, mentions)
+   */
+  extractPatterns(text: string): {
+    emails: string[];
+    phones: string[];
+    urls: string[];
+    mentions: string[];
+  } {
+    return extractBasicPatterns(text);
   }
 
   // ============================================================
