@@ -1,0 +1,38 @@
+{
+  "name": "peanut-core",
+  "version": "0.1.0",
+  "description": "Peanut-1: Local-first AI memory system with entity resolution, hybrid search, and personality mirroring",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "lint": "eslint src --ext .ts",
+    "seed": "npx ts-node scripts/seed-test-data.ts",
+    "migrate": "npx ts-node src/db/migrate.ts",
+    "cli": "npx ts-node src/cli.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "ts-node": "^10.9.2",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
