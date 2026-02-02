@@ -74,6 +74,7 @@ import type {
 export * from './types';
 export * from './ingestion/types';
 export * from './engagement';
+export * from './fixtures';
 // Note: extraction/types not re-exported to avoid conflicts with types.ts
 
 export class PeanutCore {
