@@ -12,6 +12,13 @@ import {
   extractBasicPatterns,
   extractFromMessage,
 } from './extraction/extractor';
+import {
+  resolveEntity,
+  mergeEntities,
+  findPotentialDuplicates,
+} from './entity/resolver';
+import { nameSimilarity } from './entity/matcher';
+import type { ResolveCandidate } from './entity/resolver';
 import type { LLMConfig } from './extraction/llm';
 import type { ExtractionResult } from './extraction/types';
 import type { GmailMessage, IMessageMessage, BatchIngestResult } from './ingestion/types';
@@ -124,6 +131,56 @@ export class PeanutCore {
     mentions: string[];
   } {
     return extractBasicPatterns(text);
+  }
+
+  // ============================================================
+  // ENTITY RESOLUTION
+  // ============================================================
+
+  /**
+   * Resolve an entity using 4-stage pipeline:
+   * 1. Exact match (email/phone)
+   * 2. Fuzzy name match
+   * 3. Graph proximity
+   * 4. LLM tie-breaker
+   */
+  async resolveEntity(
+    candidate: ResolveCandidate,
+    options?: {
+      contextEntityIds?: string[];
+      contextText?: string;
+      llmConfig?: LLMConfig;
+    }
+  ): Promise<{ entityId: string; created: boolean; matchType: string }> {
+    this.ensureInitialized();
+    return resolveEntity(candidate, options);
+  }
+
+  /**
+   * Merge two entities (combine attributes and update references)
+   */
+  mergeEntities(keepId: string, mergeId: string): void {
+    this.ensureInitialized();
+    mergeEntities(keepId, mergeId);
+  }
+
+  /**
+   * Find potential duplicate entities based on name similarity
+   */
+  findDuplicates(threshold: number = 0.8): Array<{
+    entity1: { id: string; name: string };
+    entity2: { id: string; name: string };
+    score: number;
+  }> {
+    this.ensureInitialized();
+    return findPotentialDuplicates(threshold);
+  }
+
+  /**
+   * Calculate name similarity between two names
+   */
+  nameSimilarity(name1: string, name2: string): number {
+    return nameSimilarity(name1, name2);
   }
 
   // ============================================================
