@@ -18,6 +18,10 @@ import {
   findPotentialDuplicates,
 } from './entity/resolver';
 import { nameSimilarity } from './entity/matcher';
+import { hybridSearch, simpleSearch } from './search/fusion';
+import { graphSearch, findMessagesBetween, getConnectedEntities } from './search/graph';
+import { embedUnprocessedMessages, getVectorStoreStats } from './search/embeddings';
+import type { EmbeddingConfig, SearchResult as SearchResultType } from './search/types';
 import type { ResolveCandidate } from './entity/resolver';
 import type { LLMConfig } from './extraction/llm';
 import type { ExtractionResult } from './extraction/types';
@@ -187,33 +191,73 @@ export class PeanutCore {
   // SEARCH
   // ============================================================
 
-  async search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+  /**
+   * Hybrid search combining FTS, vector, and graph search
+   * Uses Reciprocal Rank Fusion to combine results
+   */
+  async search(query: string, options?: SearchOptions): Promise<SearchResultType[]> {
     this.ensureInitialized();
+    // Use simple search by default (no embeddings required)
+    return simpleSearch(query, options);
+  }
 
-    const limit = options?.limit ?? 10;
+  /**
+   * Hybrid search with vector embeddings (requires embedding config)
+   */
+  async searchWithEmbeddings(
+    query: string,
+    embeddingConfig: EmbeddingConfig,
+    options?: SearchOptions
+  ): Promise<SearchResultType[]> {
+    this.ensureInitialized();
+    return hybridSearch(query, options, embeddingConfig);
+  }
 
-    // TODO: Implement hybrid search in search/fusion.ts
-    // For now, just do FTS
-    const db = getDb();
-    const stmt = db.prepare(`
-      SELECT m.*,
-             bm25(messages_fts) as score
-      FROM messages_fts
-      JOIN messages m ON messages_fts.rowid = m.rowid
-      WHERE messages_fts MATCH ?
-      ORDER BY score
-      LIMIT ?
-    `);
+  /**
+   * Graph-based search for relationship queries
+   * e.g., "Jake's boss", "Sarah's colleagues"
+   */
+  searchGraph(query: string, options?: SearchOptions): SearchResultType[] {
+    this.ensureInitialized();
+    return graphSearch(query, options);
+  }
 
-    const results = stmt.all(query, limit) as Array<Record<string, unknown>>;
+  /**
+   * Find messages between two entities
+   */
+  getMessagesBetween(entityId1: string, entityId2: string, limit?: number): SearchResultType[] {
+    this.ensureInitialized();
+    return findMessagesBetween(entityId1, entityId2, limit);
+  }
 
-    return results.map((row, index) => ({
-      id: row['id'] as string,
-      type: 'message' as const,
-      score: 1 / (index + 1), // Simple rank-based score for now
-      source: 'fts' as const,
-      data: row as unknown as import('./types').StoredMessage,
-    }));
+  /**
+   * Get entities connected to a given entity
+   */
+  getConnectedEntities(
+    entityId: string,
+    edgeTypes?: string[],
+    depth?: number
+  ): Array<{ id: string; name: string; edgeType: string; distance: number }> {
+    this.ensureInitialized();
+    return getConnectedEntities(entityId, edgeTypes, depth);
+  }
+
+  /**
+   * Embed unprocessed messages for vector search
+   */
+  async embedMessages(embeddingConfig: EmbeddingConfig, batchSize?: number): Promise<{
+    processed: number;
+    errors: number;
+  }> {
+    this.ensureInitialized();
+    return embedUnprocessedMessages(embeddingConfig, batchSize);
+  }
+
+  /**
+   * Get vector store statistics
+   */
+  getVectorStats(): { count: number; byType: Record<string, number> } {
+    return getVectorStoreStats();
   }
 
   // ============================================================
