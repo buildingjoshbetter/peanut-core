@@ -1,0 +1,88 @@
+[
+  {
+    "id": "msg001",
+    "threadId": "thread001",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "Jake Miller <jake@example.com>" },
+        { "name": "To", "value": "josh@skippy.ai" },
+        { "name": "Subject", "value": "Quick question about the project" },
+        { "name": "Date", "value": "Mon, 1 Jan 2024 10:00:00 -0800" }
+      ],
+      "mimeType": "text/plain",
+      "body": {
+        "data": "SGV5IEpvc2gsIHdhbnRlZCB0byBjaGVjayBpbiBvbiB0aGUgcHJvamVjdCBzdGF0dXMuIENhbiB3ZSBzeW5jIHRvbW9ycm93Pw=="
+      }
+    },
+    "internalDate": "1704128400000"
+  },
+  {
+    "id": "msg002",
+    "threadId": "thread001",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "josh@skippy.ai" },
+        { "name": "To", "value": "Jake Miller <jake@example.com>" },
+        { "name": "Subject", "value": "Re: Quick question about the project" },
+        { "name": "Date", "value": "Mon, 1 Jan 2024 10:30:00 -0800" }
+      ],
+      "mimeType": "text/plain",
+      "body": {
+        "data": "SGV5IEpha2UhIFllcywgdG9tb3Jyb3cgd29ya3MgcGVyZmVjdC4gTGV0J3MgZG8gMnBtPw=="
+      }
+    },
+    "internalDate": "1704130200000"
+  },
+  {
+    "id": "msg003",
+    "threadId": "thread002",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "Sarah Chen <sarah@techcorp.com>" },
+        { "name": "To", "value": "josh@skippy.ai" },
+        { "name": "Cc", "value": "Jake Miller <jake@example.com>" },
+        { "name": "Subject", "value": "Partnership proposal" },
+        { "name": "Date", "value": "Tue, 2 Jan 2024 09:00:00 -0800" }
+      ],
+      "mimeType": "text/plain",
+      "body": {
+        "data": "SGkgSm9zaCwgSSdtIFNhcmFoIGZyb20gVGVjaENvcnAuIFdlJ2QgbG92ZSB0byBleHBsb3JlIGEgcGFydG5lcnNoaXAuIEpha2UgbWVudGlvbmVkIHlvdSdyZSBkb2luZyBhbWF6aW5nIHdvcmsu"
+      }
+    },
+    "internalDate": "1704214800000"
+  },
+  {
+    "id": "msg004",
+    "threadId": "thread003",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "Mom <mom@family.net>" },
+        { "name": "To", "value": "josh@skippy.ai" },
+        { "name": "Subject", "value": "Dinner Sunday?" },
+        { "name": "Date", "value": "Wed, 3 Jan 2024 18:00:00 -0800" }
+      ],
+      "mimeType": "text/plain",
+      "body": {
+        "data": "SGV5IGhvbmV5LCBhcmUgeW91IGNvbWluZyBmb3IgZGlubmVyIFN1bmRheT8gRGFkJ3MgbWFraW5nIGhpcyBmYW1vdXMgbGFzYWduYS4gTG92ZSB5b3Uh"
+      }
+    },
+    "internalDate": "1704333600000"
+  },
+  {
+    "id": "msg005",
+    "threadId": "thread003",
+    "payload": {
+      "headers": [
+        { "name": "From", "value": "josh@skippy.ai" },
+        { "name": "To", "value": "Mom <mom@family.net>" },
+        { "name": "Subject", "value": "Re: Dinner Sunday?" },
+        { "name": "Date", "value": "Wed, 3 Jan 2024 18:30:00 -0800" }
+      ],
+      "mimeType": "text/plain",
+      "body": {
+        "data": "WW91IGtub3cgSSBjYW4ndCBtaXNzIGRhZCdzIGxhc2FnbmEhIFNlZSB5b3UgdGhlbiA8Mw=="
+      }
+    },
+    "internalDate": "1704335400000"
+  }
+]

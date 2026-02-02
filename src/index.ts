@@ -2,6 +2,12 @@
 // Main entry point and public API
 
 import { initDb, closeDb, getDb } from './db/connection';
+import {
+  ingestNormalizedMessages,
+  ingestGmailMessages,
+  ingestIMessages,
+} from './ingestion/pipeline';
+import type { GmailMessage, IMessageMessage, BatchIngestResult } from './ingestion/types';
 import type {
   PeanutConfig,
   NormalizedMessage,
@@ -16,6 +22,7 @@ import type {
 } from './types';
 
 export * from './types';
+export * from './ingestion/types';
 
 export class PeanutCore {
   private config: PeanutConfig;
@@ -55,35 +62,17 @@ export class PeanutCore {
 
   async ingestMessages(messages: NormalizedMessage[]): Promise<IngestResult> {
     this.ensureInitialized();
+    return ingestNormalizedMessages(messages);
+  }
 
-    // TODO: Implement in ingestion/pipeline.ts
-    const result: IngestResult = {
-      messagesIngested: 0,
-      entitiesCreated: 0,
-      entitiesMerged: 0,
-      assertionsCreated: 0,
-      errors: [],
-    };
+  async ingestGmail(messages: GmailMessage[]): Promise<BatchIngestResult> {
+    this.ensureInitialized();
+    return ingestGmailMessages(messages, this.config.userEmail);
+  }
 
-    for (const message of messages) {
-      try {
-        // 1. Resolve sender entity
-        // 2. Resolve recipient entities
-        // 3. Store message
-        // 4. Extract and store assertions
-        // 5. Update graph edges
-
-        result.messagesIngested++;
-      } catch (error) {
-        const err = error as Error;
-        result.errors.push({
-          sourceId: message.sourceId,
-          error: err.message,
-        });
-      }
-    }
-
-    return result;
+  async ingestIMessages(messages: IMessageMessage[]): Promise<BatchIngestResult> {
+    this.ensureInitialized();
+    return ingestIMessages(messages, this.config.userPhone, this.config.userEmail);
   }
 
   // ============================================================
