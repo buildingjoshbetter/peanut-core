@@ -4,6 +4,35 @@ import { getDb } from '../db/connection';
 import type { SearchResult, SearchOptions } from './types';
 
 /**
+ * Sanitize query for FTS5 MATCH syntax
+ * Removes/escapes special characters that have meaning in FTS5
+ */
+function sanitizeFtsQuery(query: string): string {
+  // Remove FTS5 special characters: " ' ( ) * - : ^
+  // Keep alphanumeric, spaces, and common punctuation
+  let sanitized = query
+    .replace(/['"():\-\^*]/g, ' ')  // Replace special FTS5 chars with space
+    .replace(/[?!.,;]/g, ' ')       // Replace common punctuation
+    .replace(/\s+/g, ' ')           // Collapse multiple spaces
+    .trim();
+
+  // If empty after sanitization, return a dummy query
+  if (!sanitized) {
+    return '""';  // Empty quoted string matches nothing
+  }
+
+  // Split into words and wrap each in quotes for exact matching
+  // This prevents FTS5 from interpreting words as operators
+  const words = sanitized.split(' ').filter(w => w.length > 0);
+  if (words.length === 0) {
+    return '""';
+  }
+
+  // Use OR to match any of the words
+  return words.map(w => `"${w}"`).join(' OR ');
+}
+
+/**
  * Search messages using FTS5
  */
 export function ftsSearchMessages(
@@ -12,6 +41,7 @@ export function ftsSearchMessages(
 ): SearchResult[] {
   const db = getDb();
   const limit = options.limit ?? 20;
+  const sanitizedQuery = sanitizeFtsQuery(query);
 
   // Build WHERE clause for filters
   const conditions: string[] = [];
@@ -67,7 +97,7 @@ export function ftsSearchMessages(
   `;
 
   try {
-    const results = db.prepare(sql).all(query, ...params, limit) as Array<{
+    const results = db.prepare(sql).all(sanitizedQuery, ...params, limit) as Array<{
       id: string;
       source_type: string;
       subject: string | null;
