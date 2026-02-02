@@ -32,6 +32,27 @@ import {
   analyzeAllRecipients,
   getAllRecipientStyles,
 } from './personality/mirror';
+import {
+  calculateEngagementScore,
+  recordDraftSent,
+  recordDraftEdited,
+  recordUserResponse,
+  recordThreadContinued,
+  getRecentEngagementEvents,
+  getAverageEngagement,
+  type EngagementSignal,
+  type EngagementScore,
+} from './engagement/tracker';
+import {
+  applyAdaptation,
+  detectVentMode,
+  calculateLearningRate,
+  calculateCapsRatio,
+  getPersonalityEvolution,
+  getEngagementSummary,
+  detectPersonalityDrift,
+  type AdaptationResult,
+} from './engagement/adaptation';
 import type { EmbeddingConfig, SearchResult as SearchResultType } from './search/types';
 import type { ResolveCandidate } from './entity/resolver';
 import type { LLMConfig } from './extraction/llm';
@@ -52,6 +73,7 @@ import type {
 
 export * from './types';
 export * from './ingestion/types';
+export * from './engagement';
 // Note: extraction/types not re-exported to avoid conflicts with types.ts
 
 export class PeanutCore {
@@ -487,45 +509,181 @@ export class PeanutCore {
   }
 
   // ============================================================
-  // ENGAGEMENT (internal tracking)
+  // ENGAGEMENT OPTIMIZATION
   // ============================================================
 
-  async recordDraftSent(draftId: string, aiLength: number, recipientEntityId?: string): Promise<void> {
+  /**
+   * Record when an AI draft is sent
+   */
+  recordDraftSent(
+    draftId: string,
+    aiDraftLength: number,
+    recipientEntityId?: string,
+    contextType?: 'work' | 'personal'
+  ): string {
     this.ensureInitialized();
-
-    const db = getDb();
-    const { v4: uuidv4 } = await import('uuid');
-
-    db.prepare(`
-      INSERT INTO engagement_events (id, interaction_type, timestamp, ai_draft_length, recipient_entity_id)
-      VALUES (?, 'draft_sent', datetime('now'), ?, ?)
-    `).run(uuidv4(), aiLength, recipientEntityId ?? null);
+    return recordDraftSent(draftId, aiDraftLength, recipientEntityId, contextType);
   }
 
-  async recordDraftEdited(draftId: string, userFinalLength: number): Promise<void> {
+  /**
+   * Record when user edits an AI draft
+   * Returns the engagement event ID
+   */
+  recordDraftEdited(
+    draftId: string,
+    userFinalLength: number,
+    aiDraftLength: number
+  ): string {
     this.ensureInitialized();
-
-    // TODO: Find matching draft_sent event and calculate edit_ratio
-    // For now, just log the edit
-    const db = getDb();
-    const { v4: uuidv4 } = await import('uuid');
-
-    db.prepare(`
-      INSERT INTO engagement_events (id, interaction_type, timestamp, user_final_length)
-      VALUES (?, 'draft_edited', datetime('now'), ?)
-    `).run(uuidv4(), userFinalLength);
+    return recordDraftEdited(draftId, userFinalLength, aiDraftLength);
   }
 
-  async recordUserResponse(threadId: string, sentiment: number): Promise<void> {
+  /**
+   * Record user response sentiment for engagement tracking
+   */
+  recordUserResponse(
+    sentiment: number,
+    threadLength: number,
+    recipientEntityId?: string
+  ): string {
     this.ensureInitialized();
+    return recordUserResponse(sentiment, threadLength, recipientEntityId);
+  }
 
+  /**
+   * Record thread continuation for engagement tracking
+   */
+  recordThreadContinued(threadLength: number, recipientEntityId?: string): string {
+    this.ensureInitialized();
+    return recordThreadContinued(threadLength, recipientEntityId);
+  }
+
+  /**
+   * Calculate engagement score from signals
+   */
+  calculateEngagementScore(signal: EngagementSignal): EngagementScore {
+    return calculateEngagementScore(signal);
+  }
+
+  /**
+   * Apply personality adaptation based on engagement signal
+   * Returns what changes were made (if any)
+   */
+  applyEngagementAdaptation(
+    signal: EngagementSignal,
+    options?: {
+      checkVentMode?: boolean;
+      sessionEngagement?: number;
+    }
+  ): AdaptationResult {
+    this.ensureInitialized();
+    return applyAdaptation(signal, options);
+  }
+
+  /**
+   * Detect if user is in "vent mode" (emotionally venting)
+   * During vent mode, personality adaptation is frozen
+   */
+  detectVentMode(
+    sentiment: number,
+    threadLength: number,
+    messageVelocity?: number,
+    capsRatio?: number
+  ): { isVenting: boolean; confidence: number; signals: string[] } {
+    return detectVentMode(sentiment, threadLength, messageVelocity, capsRatio);
+  }
+
+  /**
+   * Calculate caps ratio in text (for vent detection)
+   */
+  calculateCapsRatio(text: string): number {
+    return calculateCapsRatio(text);
+  }
+
+  /**
+   * Get current learning rate based on interaction count
+   * Decays from 0.3 to 0.05 as confidence grows
+   */
+  getCurrentLearningRate(): number {
+    this.ensureInitialized();
     const db = getDb();
-    const { v4: uuidv4 } = await import('uuid');
+    const stats = db.prepare(`
+      SELECT interaction_count FROM user_style WHERE id = 'default'
+    `).get() as { interaction_count: number } | undefined;
+    return calculateLearningRate(stats?.interaction_count ?? 0);
+  }
 
-    db.prepare(`
-      INSERT INTO engagement_events (id, interaction_type, timestamp, user_response_sentiment)
-      VALUES (?, 'response_received', datetime('now'), ?)
-    `).run(uuidv4(), sentiment);
+  /**
+   * Get recent engagement events
+   */
+  getRecentEngagementEvents(
+    limit?: number,
+    recipientEntityId?: string
+  ): Array<{
+    id: string;
+    interactionType: string;
+    timestamp: Date;
+    editRatio?: number;
+    sentiment?: number;
+    threadLength?: number;
+    recipientEntityId?: string;
+  }> {
+    this.ensureInitialized();
+    return getRecentEngagementEvents(limit, recipientEntityId);
+  }
+
+  /**
+   * Get average engagement over a time window
+   */
+  getAverageEngagement(
+    windowDays?: number,
+    recipientEntityId?: string
+  ): { average: number; count: number } {
+    this.ensureInitialized();
+    return getAverageEngagement(windowDays, recipientEntityId);
+  }
+
+  /**
+   * Get personality evolution history
+   */
+  getPersonalityEvolution(
+    limit?: number,
+    dimension?: string
+  ): Array<{
+    id: string;
+    timestamp: Date;
+    dimension: string;
+    oldValue: number;
+    newValue: number;
+    learningRate: number;
+  }> {
+    this.ensureInitialized();
+    return getPersonalityEvolution(limit, dimension);
+  }
+
+  /**
+   * Detect significant personality drift using CUSUM algorithm
+   */
+  detectPersonalityDrift(
+    dimension: string,
+    threshold?: number
+  ): { driftDetected: boolean; magnitude: number; direction: 'positive' | 'negative' | 'none' } {
+    this.ensureInitialized();
+    return detectPersonalityDrift(dimension, threshold);
+  }
+
+  /**
+   * Get comprehensive engagement summary
+   */
+  getEngagementSummary(): {
+    totalInteractions: number;
+    averageEngagement: number;
+    currentLearningRate: number;
+    recentDrifts: Array<{ dimension: string; direction: string }>;
+    ventModeCount: number;
+  } {
+    this.ensureInitialized();
+    return getEngagementSummary();
   }
 
   // ============================================================

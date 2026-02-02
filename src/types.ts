@@ -169,32 +169,7 @@ export interface RecipientStyleProfile {
   updatedAt: Date;
 }
 
-// ============================================================
-// ENGAGEMENT TYPES
-// ============================================================
-
-export interface EngagementSignal {
-  id: string;
-  interactionType: 'draft_sent' | 'draft_edited' | 'thread_continued' | 'response_received';
-  timestamp: Date;
-
-  // What happened
-  aiDraftLength?: number;
-  userFinalLength?: number;
-  editRatio?: number;
-  threadLength?: number;
-
-  // Sentiment
-  userResponseSentiment?: number;
-
-  // Context
-  contextType?: 'work' | 'personal';
-  recipientEntityId?: string;
-
-  // Learning
-  learningApplied: boolean;
-  personalityDelta?: Record<string, number>;
-}
+// Note: EngagementSignal and related types are in ./engagement/tracker.ts
 
 // ============================================================
 // EXTRACTION TYPES
