@@ -21,6 +21,17 @@ import { nameSimilarity } from './entity/matcher';
 import { hybridSearch, simpleSearch } from './search/fusion';
 import { graphSearch, findMessagesBetween, getConnectedEntities } from './search/graph';
 import { embedUnprocessedMessages, getVectorStoreStats } from './search/embeddings';
+import {
+  analyzeUserStyle,
+  analyzeRecipientStyle,
+  inferRelationshipType,
+} from './personality/extractor';
+import {
+  generateMirrorPrompt,
+  calculateRapportScore,
+  analyzeAllRecipients,
+  getAllRecipientStyles,
+} from './personality/mirror';
 import type { EmbeddingConfig, SearchResult as SearchResultType } from './search/types';
 import type { ResolveCandidate } from './entity/resolver';
 import type { LLMConfig } from './extraction/llm';
@@ -369,6 +380,17 @@ export class PeanutCore {
   // PERSONALITY
   // ============================================================
 
+  /**
+   * Analyze user's messages to build/update style profile
+   */
+  analyzeUserStyle(): StyleProfile {
+    this.ensureInitialized();
+    return analyzeUserStyle();
+  }
+
+  /**
+   * Get cached user style profile
+   */
   async getUserStyle(): Promise<StyleProfile> {
     this.ensureInitialized();
 
@@ -388,6 +410,17 @@ export class PeanutCore {
     };
   }
 
+  /**
+   * Analyze messages to a specific recipient
+   */
+  analyzeRecipientStyle(recipientEntityId: string): RecipientStyleProfile | null {
+    this.ensureInitialized();
+    return analyzeRecipientStyle(recipientEntityId);
+  }
+
+  /**
+   * Get cached recipient style profile
+   */
   async getRecipientStyle(entityId: string): Promise<RecipientStyleProfile | null> {
     this.ensureInitialized();
 
@@ -409,38 +442,48 @@ export class PeanutCore {
     };
   }
 
-  async generateMirrorPrompt(recipientEntityId: string, mirrorLevel: number = 0.7): Promise<string> {
+  /**
+   * Get all recipient style profiles
+   */
+  getAllRecipientStyles(): RecipientStyleProfile[] {
     this.ensureInitialized();
+    return getAllRecipientStyles();
+  }
 
+  /**
+   * Analyze all recipients and build style profiles
+   */
+  analyzeAllRecipients(): number {
+    this.ensureInitialized();
+    return analyzeAllRecipients();
+  }
+
+  /**
+   * Infer relationship type from communication patterns
+   */
+  inferRelationshipType(recipientEntityId: string): import('./types').RelationshipType | null {
+    this.ensureInitialized();
+    return inferRelationshipType(recipientEntityId);
+  }
+
+  /**
+   * Generate a system prompt for AI drafting that mirrors user's style
+   */
+  generateMirrorPrompt(recipientEntityId?: string, mirrorLevel: number = 0.7): string {
+    this.ensureInitialized();
+    return generateMirrorPrompt(recipientEntityId, mirrorLevel);
+  }
+
+  /**
+   * Calculate rapport score for an AI draft
+   */
+  async calculateRapportScore(aiDraft: string, recipientEntityId?: string): Promise<number> {
+    this.ensureInitialized();
     const userStyle = await this.getUserStyle();
-    const recipientStyle = await this.getRecipientStyle(recipientEntityId);
-
-    // TODO: Implement in personality/mirror.ts
-    // For now, return a basic prompt
-    const formality = recipientStyle?.formality ?? userStyle.formality;
-    const warmth = recipientStyle?.warmth ?? 0.5;
-
-    let prompt = 'You are drafting a message. ';
-
-    if (formality > 0.7) {
-      prompt += 'Use a formal, professional tone. ';
-    } else if (formality < 0.3) {
-      prompt += 'Use a casual, friendly tone. ';
-    }
-
-    if (warmth > 0.7) {
-      prompt += 'Be warm and personable. ';
-    }
-
-    if (userStyle.greetingPatterns.length > 0) {
-      prompt += `Consider using greetings like: ${userStyle.greetingPatterns.slice(0, 3).join(', ')}. `;
-    }
-
-    if (userStyle.signoffPatterns.length > 0) {
-      prompt += `Consider sign-offs like: ${userStyle.signoffPatterns.slice(0, 3).join(', ')}. `;
-    }
-
-    return prompt;
+    const recipientStyle = recipientEntityId
+      ? await this.getRecipientStyle(recipientEntityId)
+      : undefined;
+    return calculateRapportScore(aiDraft, userStyle, recipientStyle ?? undefined);
   }
 
   // ============================================================
