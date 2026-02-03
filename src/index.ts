@@ -77,6 +77,20 @@ export * from './engagement';
 export * from './fixtures';
 // Note: extraction/types not re-exported to avoid conflicts with types.ts
 
+// New systems added for strategy compliance
+export * as belief from './belief';
+export * as context from './context';
+export * as commitments from './commitments';
+
+// Additional modules for complete peanut-core implementation
+export * as goals from './goals';
+export * as behavioral from './behavioral';
+export * as synthesis from './synthesis';
+export * as integrations from './integrations';
+export * as cognitive from './cognitive';
+export * as pii from './ingestion/pii';
+export * as lancedb from './db/lancedb';
+
 export class PeanutCore {
   private config: PeanutConfig;
   private initialized: boolean = false;

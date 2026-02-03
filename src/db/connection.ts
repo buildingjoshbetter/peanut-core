@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
+import { applyMigrations } from './migrations';
 
 let db: Database.Database | null = null;
 
@@ -215,8 +216,17 @@ export function initDb(dbPath: string): Database.Database {
   // Enable foreign keys
   db.pragma('foreign_keys = ON');
 
-  // Execute schema
+  // Execute base schema
   db.exec(SCHEMA);
+
+  // Apply any pending migrations
+  const { applied, errors } = applyMigrations(db);
+  if (applied.length > 0) {
+    console.log(`Applied ${applied.length} migration(s): ${applied.join(', ')}`);
+  }
+  if (errors.length > 0) {
+    console.warn('Migration warnings:', errors);
+  }
 
   return db;
 }
