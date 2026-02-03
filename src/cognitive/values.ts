@@ -312,17 +312,76 @@ export function detectValueConflicts(): ValueConflict[] {
     const v2 = values.find(v => v.name === v2Name);
 
     if (v1 && v2 && v1.strength > 0.5 && v2.strength > 0.5) {
+      // Query for actual conflict occurrences from value_conflicts table
+      const conflictData = query<{ occurrence_count: number; last_occurred: string }>(`
+        SELECT occurrence_count, last_occurred
+        FROM value_conflicts
+        WHERE (value1_name = ? AND value2_name = ?)
+           OR (value1_name = ? AND value2_name = ?)
+        LIMIT 1
+      `, [v1Name, v2Name, v2Name, v1Name]);
+
+      const data = conflictData[0];
+
       conflicts.push({
         value1Id: v1.id,
         value2Id: v2.id,
         description,
-        occurrenceCount: 1,  // Would need tracking
-        lastOccurred: new Date(),
+        occurrenceCount: data?.occurrence_count ?? 1,
+        lastOccurred: data?.last_occurred ? new Date(data.last_occurred) : new Date(),
       });
     }
   }
 
   return conflicts;
+}
+
+/**
+ * Record a value conflict occurrence
+ */
+export function recordValueConflict(
+  value1Name: string,
+  value2Name: string,
+  context?: string
+): void {
+  // Ensure consistent ordering for lookup
+  const [name1, name2] = [value1Name, value2Name].sort();
+
+  // Try to update existing record
+  const result = execute(`
+    UPDATE value_conflicts
+    SET occurrence_count = occurrence_count + 1,
+        last_occurred = CURRENT_TIMESTAMP,
+        last_context = ?
+    WHERE value1_name = ? AND value2_name = ?
+  `, [context || null, name1, name2]);
+
+  // If no existing record, create one
+  if (result.changes === 0) {
+    execute(`
+      INSERT INTO value_conflicts (id, value1_name, value2_name, occurrence_count, last_occurred, last_context, created_at)
+      VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+    `, [uuid(), name1, name2, context || null]);
+  }
+}
+
+/**
+ * Initialize value_conflicts table if needed
+ * (Called during module initialization)
+ */
+export function ensureValueConflictsTable(): void {
+  execute(`
+    CREATE TABLE IF NOT EXISTS value_conflicts (
+      id TEXT PRIMARY KEY,
+      value1_name TEXT NOT NULL,
+      value2_name TEXT NOT NULL,
+      occurrence_count INTEGER DEFAULT 1,
+      last_occurred DATETIME,
+      last_context TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(value1_name, value2_name)
+    )
+  `, []);
 }
 
 /**

@@ -261,6 +261,8 @@ export function inferWorkPreferences(): {
   peakHours: number[];
   preferredDays: number[];
   focusPattern: 'deep_focus' | 'multitasker' | 'balanced';
+  preferredLoad: 'light' | 'moderate' | 'heavy';
+  collaborationPreference: 'solo' | 'team' | 'mixed';
 } {
   // Get activity by hour
   const hourlyActivity = query<{
@@ -313,10 +315,49 @@ export function inferWorkPreferences(): {
   if (avgSwitchesPerDay < 50) focusPattern = 'deep_focus';
   else if (avgSwitchesPerDay > 150) focusPattern = 'multitasker';
 
+  // Infer preferred load from open commitment count
+  const commitmentLoad = query<{ count: number }>(`
+    SELECT COUNT(*) as count
+    FROM commitments
+    WHERE status = 'open'
+  `, []);
+
+  const openCommitments = commitmentLoad[0]?.count || 0;
+  let preferredLoad: 'light' | 'moderate' | 'heavy' = 'moderate';
+  if (openCommitments < 5) preferredLoad = 'light';
+  else if (openCommitments > 15) preferredLoad = 'heavy';
+
+  // Infer collaboration preference from meeting/multi-recipient patterns
+  const collaborationStats = query<{
+    total_threads: number;
+    multi_recipient_threads: number;
+  }>(`
+    SELECT
+      COUNT(DISTINCT thread_id) as total_threads,
+      COUNT(DISTINCT CASE
+        WHEN LENGTH(recipient_entity_ids) - LENGTH(REPLACE(recipient_entity_ids, ',', '')) > 0
+        THEN thread_id
+      END) as multi_recipient_threads
+    FROM messages
+    WHERE is_from_user = 1
+      AND timestamp > datetime('now', '-30 days')
+  `, []);
+
+  const stats = collaborationStats[0] || { total_threads: 0, multi_recipient_threads: 0 };
+  const multiRecipientRatio = stats.total_threads > 0
+    ? stats.multi_recipient_threads / stats.total_threads
+    : 0.5;
+
+  let collaborationPreference: 'solo' | 'team' | 'mixed' = 'mixed';
+  if (multiRecipientRatio < 0.2) collaborationPreference = 'solo';
+  else if (multiRecipientRatio > 0.6) collaborationPreference = 'team';
+
   return {
     peakHours,
     preferredDays,
     focusPattern,
+    preferredLoad,
+    collaborationPreference,
   };
 }
 
@@ -424,8 +465,8 @@ export function buildCognitiveProfile(): CognitiveProfile {
     },
     workStyle: {
       focusPattern: workPrefs.focusPattern,
-      preferredLoad: 'moderate',  // Would need more data
-      collaborationPreference: 'mixed',  // Would need more data
+      preferredLoad: workPrefs.preferredLoad,
+      collaborationPreference: workPrefs.collaborationPreference,
     },
   };
 }

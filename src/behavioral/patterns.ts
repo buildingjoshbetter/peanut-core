@@ -134,7 +134,7 @@ function detectSequencePatterns(events: EventData[], minOccurrences: number): Pa
   );
 
   // Look for 2-event and 3-event sequences
-  const sequenceCounts = new Map<string, { count: number; gaps: number[] }>();
+  const sequenceCounts = new Map<string, { count: number; gaps: number[]; timestamps: Date[] }>();
 
   for (let i = 0; i < sorted.length - 1; i++) {
     const current = sorted[i]!;
@@ -147,11 +147,12 @@ function detectSequencePatterns(events: EventData[], minOccurrences: number): Pa
     const key = `${current.activityCategory || current.eventType}->${next.activityCategory || next.eventType}`;
 
     if (!sequenceCounts.has(key)) {
-      sequenceCounts.set(key, { count: 0, gaps: [] });
+      sequenceCounts.set(key, { count: 0, gaps: [], timestamps: [] });
     }
     const data = sequenceCounts.get(key)!;
     data.count++;
     data.gaps.push(gapMinutes);
+    data.timestamps.push(current.timestamp);
   }
 
   // Convert to patterns
@@ -163,7 +164,7 @@ function detectSequencePatterns(events: EventData[], minOccurrences: number): Pa
       patterns.push({
         patternType: 'routine',
         description: `Sequence: ${key.replace('->', ' → ')}`,
-        occurrences: [],  // Would need to track actual occurrences
+        occurrences: data.timestamps,
         confidence,
         timeSignature: {
           intervalMinutes: Math.round(avgGap),
@@ -239,7 +240,7 @@ function detectTriggerResponsePatterns(events: EventData[], minOccurrences: numb
     a.timestamp.getTime() - b.timestamp.getTime()
   );
 
-  const triggerResponses = new Map<string, number>();
+  const triggerResponses = new Map<string, { count: number; timestamps: Date[] }>();
 
   for (let i = 0; i < sorted.length - 1; i++) {
     const current = sorted[i]!;
@@ -252,20 +253,25 @@ function detectTriggerResponsePatterns(events: EventData[], minOccurrences: numb
       // Response within 60 seconds
       if (gapSeconds > 0 && gapSeconds < 60) {
         const key = `${current.eventType}:${next.activityCategory || next.eventType}`;
-        triggerResponses.set(key, (triggerResponses.get(key) || 0) + 1);
+        if (!triggerResponses.has(key)) {
+          triggerResponses.set(key, { count: 0, timestamps: [] });
+        }
+        const data = triggerResponses.get(key)!;
+        data.count++;
+        data.timestamps.push(current.timestamp);
       }
     }
   }
 
-  for (const [key, count] of triggerResponses) {
-    if (count >= minOccurrences) {
+  for (const [key, data] of triggerResponses) {
+    if (data.count >= minOccurrences) {
       const [trigger, response] = key.split(':');
-      const confidence = Math.min(1, count / 10);
+      const confidence = Math.min(1, data.count / 10);
 
       patterns.push({
         patternType: 'trigger_response',
         description: `${trigger} triggers ${response}`,
-        occurrences: [],
+        occurrences: data.timestamps,
         confidence,
       });
     }

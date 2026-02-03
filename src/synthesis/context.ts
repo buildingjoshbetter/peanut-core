@@ -9,6 +9,7 @@
 
 import { query } from '../db/connection';
 import type { Entity, Assertion, Commitment, Goal } from '../types';
+import { getGoalProgress } from '../goals/tracker';
 
 // ============================================================
 // TYPES
@@ -424,6 +425,10 @@ function getGoalsContext(entityIds: string[]): GoalContext[] {
       const targetDate = row.target_date ? new Date(row.target_date) : undefined;
       const isOverdue = targetDate ? targetDate < now : false;
 
+      // Calculate actual progress using goals tracker
+      const progressData = getGoalProgress(row.id);
+      const progress = progressData?.progress ?? 0;
+
       return {
         goal: {
           id: row.id,
@@ -436,7 +441,7 @@ function getGoalsContext(entityIds: string[]): GoalContext[] {
           targetDate,
           completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
         },
-        progress: 0,  // Would need to calculate
+        progress,
         isOverdue,
       };
     });
@@ -469,11 +474,26 @@ function getConversationContext(threadId: string): ConversationContext {
   const allText = messages.map(m => `${m.subject || ''} ${m.body_text}`).join(' ');
   const topics = extractTopics(allText);
 
+  // Get unresolved contradictions from belief system
+  const unresolvedRows = query<{ description: string }>(`
+    SELECT
+      'Conflicting info about ' || e.canonical_name || ': ' ||
+      a1.predicate || ' differs between sources' as description
+    FROM belief_contradictions bc
+    JOIN assertions a1 ON bc.assertion1_id = a1.id
+    LEFT JOIN entities e ON a1.subject_entity_id = e.id
+    WHERE bc.resolution_status = 'unresolved'
+    ORDER BY bc.detected_at DESC
+    LIMIT 5
+  `, []);
+
+  const unresolved = unresolvedRows.map(r => r.description);
+
   return {
     threadLength: messages.length,
     lastMessageAge,
     topicsDiscussed: topics,
-    unresolved: [],  // Would need more analysis
+    unresolved,
   };
 }
 

@@ -292,28 +292,113 @@ export function maskPii(text: string, options?: { types?: PiiType[] }): string {
 
 /**
  * Partially mask PII (show first/last few characters)
+ * Shows enough to identify the value while hiding sensitive parts
  */
 export function partialMaskPii(text: string, options?: { types?: PiiType[] }): string {
-  const result = scrubPii(text, {
-    ...options,
-    reversible: false,
-    replacementFormat: (type, _token) => {
-      // This is a placeholder - in real implementation,
-      // we'd need access to the original value
-      switch (type) {
-        case 'email':
-          return 'u***@***.com';
-        case 'phone':
-          return '(***) ***-**XX';
-        case 'creditCard':
-          return '****-****-****-XXXX';
-        default:
-          return '[PARTIALLY_REDACTED]';
-      }
-    },
-  });
+  const matches = detectPii(text, { types: options?.types });
 
-  return result.scrubbedText;
+  // Process matches in reverse order to preserve indices
+  let result = text;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const match = matches[i]!;
+    const masked = createPartialMask(match.type, match.value);
+
+    result =
+      result.slice(0, match.start) +
+      masked +
+      result.slice(match.end);
+  }
+
+  return result;
+}
+
+/**
+ * Create a partial mask for a PII value
+ * Shows first/last characters to help identify while hiding sensitive parts
+ */
+function createPartialMask(type: PiiType, value: string): string {
+  switch (type) {
+    case 'email': {
+      // john.doe@company.com -> j*****e@c*****y.com
+      const [local, domain] = value.split('@');
+      if (!local || !domain) return '***@***.***';
+      const maskedLocal = local.length > 2
+        ? local[0] + '*'.repeat(local.length - 2) + local[local.length - 1]
+        : '*'.repeat(local.length);
+      const domainParts = domain.split('.');
+      const maskedDomain = domainParts.map(part =>
+        part.length > 2
+          ? part[0] + '*'.repeat(part.length - 2) + part[part.length - 1]
+          : part
+      ).join('.');
+      return `${maskedLocal}@${maskedDomain}`;
+    }
+
+    case 'phone': {
+      // (555) 123-4567 -> (***) ***-4567
+      // Show only last 4 digits
+      const digits = value.replace(/\D/g, '');
+      const last4 = digits.slice(-4);
+      return `(***) ***-${last4}`;
+    }
+
+    case 'ssn': {
+      // 123-45-6789 -> ***-**-6789
+      // Show only last 4 digits
+      const digits = value.replace(/\D/g, '');
+      const last4 = digits.slice(-4);
+      return `***-**-${last4}`;
+    }
+
+    case 'creditCard': {
+      // 4111111111111111 -> ****-****-****-1111
+      // Show only last 4 digits
+      const digits = value.replace(/\D/g, '');
+      const last4 = digits.slice(-4);
+      return `****-****-****-${last4}`;
+    }
+
+    case 'ipAddress': {
+      // 192.168.1.100 -> 192.168.***.***
+      // Show first two octets
+      const parts = value.split('.');
+      if (parts.length === 4) {
+        return `${parts[0]}.${parts[1]}.***.***`;
+      }
+      return '***.***.***.***';
+    }
+
+    case 'address': {
+      // 123 Main Street Apt 4 -> 1** M*** S***** A** *
+      // Show first letter of each word
+      const words = value.split(/\s+/);
+      return words.map(word => {
+        if (/^\d+$/.test(word)) {
+          // Numbers: show first digit
+          return word[0] + '*'.repeat(word.length - 1);
+        }
+        return word.length > 1
+          ? word[0] + '*'.repeat(word.length - 1)
+          : '*';
+      }).join(' ');
+    }
+
+    case 'passport':
+    case 'driversLicense': {
+      // Show first 2 and last 2 characters
+      if (value.length > 4) {
+        return value.slice(0, 2) + '*'.repeat(value.length - 4) + value.slice(-2);
+      }
+      return '*'.repeat(value.length);
+    }
+
+    default:
+      // Generic: show first and last character
+      if (value.length > 2) {
+        return value[0] + '*'.repeat(value.length - 2) + value[value.length - 1];
+      }
+      return '*'.repeat(value.length);
+  }
 }
 
 // Validation helpers
