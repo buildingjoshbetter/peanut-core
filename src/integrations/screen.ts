@@ -470,3 +470,239 @@ function formatAgo(date: Date): string {
   const hours = Math.floor(minutes / 60);
   return `${hours}h ago`;
 }
+
+// ============================================================
+// ENTITY-BASED SEARCH
+// ============================================================
+
+/**
+ * Get screen captures that mention a specific entity
+ */
+export function getScreensForEntity(entityId: string, options?: {
+  limit?: number;
+  startDate?: Date;
+  endDate?: Date;
+}): Array<{
+  id: string;
+  timestamp: Date;
+  app: string;
+  windowTitle: string;
+  ocrText: string;
+  matchedText: string;
+}> {
+  // Get entity's canonical name and aliases
+  const entity = query<{ canonical_name: string }>(`
+    SELECT canonical_name FROM entities WHERE id = ?
+  `, [entityId]);
+
+  if (entity.length === 0) return [];
+
+  const canonicalName = entity[0]!.canonical_name;
+
+  // Get aliases
+  const aliases = query<{ attribute_value: string }>(`
+    SELECT attribute_value FROM entity_attributes
+    WHERE entity_id = ? AND attribute_type IN ('alias', 'email', 'first_name')
+  `, [entityId]);
+
+  // Build search terms
+  const searchTerms = [canonicalName, ...aliases.map(a => a.attribute_value)];
+
+  // Build SQL with LIKE conditions for each search term
+  let sql = 'SELECT * FROM screen_captures WHERE (';
+  const params: unknown[] = [];
+
+  const likeConditions = searchTerms.map(term => {
+    params.push(`%${term}%`);
+    return 'ocr_text LIKE ?';
+  });
+
+  sql += likeConditions.join(' OR ') + ')';
+
+  if (options?.startDate) {
+    sql += ' AND timestamp >= ?';
+    params.push(options.startDate.toISOString());
+  }
+
+  if (options?.endDate) {
+    sql += ' AND timestamp <= ?';
+    params.push(options.endDate.toISOString());
+  }
+
+  sql += ' ORDER BY timestamp DESC';
+
+  if (options?.limit) {
+    sql += ' LIMIT ?';
+    params.push(options.limit);
+  } else {
+    sql += ' LIMIT 50';  // Default limit
+  }
+
+  const rows = query<{
+    id: string;
+    timestamp: string;
+    app: string;
+    window_title: string;
+    ocr_text: string;
+  }>(sql, params);
+
+  return rows.map(row => {
+    // Find the matching text snippet
+    const lowerOcr = row.ocr_text.toLowerCase();
+    let matchedText = '';
+
+    for (const term of searchTerms) {
+      const idx = lowerOcr.indexOf(term.toLowerCase());
+      if (idx >= 0) {
+        // Get context around the match
+        const start = Math.max(0, idx - 30);
+        const end = Math.min(row.ocr_text.length, idx + term.length + 30);
+        matchedText = '...' + row.ocr_text.slice(start, end) + '...';
+        break;
+      }
+    }
+
+    return {
+      id: row.id,
+      timestamp: new Date(row.timestamp),
+      app: row.app,
+      windowTitle: row.window_title,
+      ocrText: row.ocr_text,
+      matchedText,
+    };
+  });
+}
+
+/**
+ * Search screen captures with full-text matching
+ */
+export function searchScreensFullText(searchQuery: string, options?: {
+  limit?: number;
+  apps?: string[];
+  startDate?: Date;
+  endDate?: Date;
+}): Array<{
+  id: string;
+  timestamp: Date;
+  app: string;
+  windowTitle: string;
+  ocrText: string;
+  relevanceScore: number;
+  highlights: string[];
+}> {
+  let sql = `
+    SELECT *,
+      (
+        (LENGTH(ocr_text) - LENGTH(REPLACE(LOWER(ocr_text), LOWER(?), ''))) / LENGTH(?)
+      ) as match_count
+    FROM screen_captures
+    WHERE (ocr_text LIKE ? OR window_title LIKE ?)
+  `;
+  const params: unknown[] = [searchQuery, searchQuery, `%${searchQuery}%`, `%${searchQuery}%`];
+
+  if (options?.apps && options.apps.length > 0) {
+    const placeholders = options.apps.map(() => '?').join(',');
+    sql += ` AND app IN (${placeholders})`;
+    params.push(...options.apps);
+  }
+
+  if (options?.startDate) {
+    sql += ' AND timestamp >= ?';
+    params.push(options.startDate.toISOString());
+  }
+
+  if (options?.endDate) {
+    sql += ' AND timestamp <= ?';
+    params.push(options.endDate.toISOString());
+  }
+
+  sql += ' ORDER BY match_count DESC, timestamp DESC';
+
+  if (options?.limit) {
+    sql += ' LIMIT ?';
+    params.push(options.limit);
+  } else {
+    sql += ' LIMIT 30';
+  }
+
+  const rows = query<{
+    id: string;
+    timestamp: string;
+    app: string;
+    window_title: string;
+    ocr_text: string;
+    match_count: number;
+  }>(sql, params);
+
+  return rows.map(row => {
+    // Extract highlight snippets
+    const highlights: string[] = [];
+    const lowerOcr = row.ocr_text.toLowerCase();
+    const lowerQuery = searchQuery.toLowerCase();
+
+    let searchStart = 0;
+    while (highlights.length < 3) {
+      const idx = lowerOcr.indexOf(lowerQuery, searchStart);
+      if (idx < 0) break;
+
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(row.ocr_text.length, idx + searchQuery.length + 40);
+      highlights.push('...' + row.ocr_text.slice(start, end) + '...');
+
+      searchStart = idx + searchQuery.length;
+    }
+
+    return {
+      id: row.id,
+      timestamp: new Date(row.timestamp),
+      app: row.app,
+      windowTitle: row.window_title,
+      ocrText: row.ocr_text,
+      relevanceScore: Math.min(1, row.match_count / 5),
+      highlights,
+    };
+  });
+}
+
+/**
+ * Get screen capture statistics
+ */
+export function getScreenCaptureStats(): {
+  totalCaptures: number;
+  capturesByApp: Record<string, number>;
+  capturesByContext: Record<string, number>;
+  oldestCapture: Date | null;
+  newestCapture: Date | null;
+} {
+  const total = query<{ count: number }>('SELECT COUNT(*) as count FROM screen_captures', []);
+
+  const byApp = query<{ app: string; count: number }>(`
+    SELECT app, COUNT(*) as count FROM screen_captures GROUP BY app ORDER BY count DESC
+  `, []);
+
+  const byContext = query<{ context_type: string; count: number }>(`
+    SELECT context_type, COUNT(*) as count FROM screen_captures GROUP BY context_type
+  `, []);
+
+  const timestamps = query<{ oldest: string | null; newest: string | null }>(`
+    SELECT MIN(timestamp) as oldest, MAX(timestamp) as newest FROM screen_captures
+  `, []);
+
+  const capturesByApp: Record<string, number> = {};
+  for (const row of byApp) {
+    capturesByApp[row.app] = row.count;
+  }
+
+  const capturesByContext: Record<string, number> = {};
+  for (const row of byContext) {
+    capturesByContext[row.context_type || 'unknown'] = row.count;
+  }
+
+  return {
+    totalCaptures: total[0]?.count ?? 0,
+    capturesByApp,
+    capturesByContext,
+    oldestCapture: timestamps[0]?.oldest ? new Date(timestamps[0].oldest) : null,
+    newestCapture: timestamps[0]?.newest ? new Date(timestamps[0].newest) : null,
+  };
+}

@@ -31,6 +31,9 @@ import {
   calculateRapportScore,
   analyzeAllRecipients,
   getAllRecipientStyles,
+  learnFromInteraction,
+  generateMirrorPromptWithLearning,
+  getLearningStats,
 } from './personality/mirror';
 import {
   calculateEngagementScore,
@@ -90,6 +93,13 @@ export * as integrations from './integrations';
 export * as cognitive from './cognitive';
 export * as pii from './ingestion/pii';
 export * as lancedb from './db/lancedb';
+
+// New modules for 100% completion
+export * as workers from './workers';
+export * as onboarding from './onboarding';
+export * as assertions from './assertions';
+export * as calendarIngestion from './ingestion/calendar';
+export * as contactsIngestion from './ingestion/contacts';
 
 export class PeanutCore {
   private config: PeanutConfig;
@@ -596,6 +606,54 @@ export class PeanutCore {
   }
 
   /**
+   * Learn from user interaction with AI draft (Part 16: Integration)
+   * This closes the engagement optimization loop
+   * 
+   * Call this after user edits a draft to automatically improve personality mirroring
+   */
+  learnFromInteraction(params: {
+    recipientEntityId?: string;
+    contextType?: 'work' | 'personal';
+    aiDraftLength: number;
+    userFinalLength: number;
+    userResponseSentiment?: number;
+    threadLength?: number;
+    threadContinued?: boolean;
+  }): ReturnType<typeof learnFromInteraction> {
+    this.ensureInitialized();
+    return learnFromInteraction(params);
+  }
+
+  /**
+   * Generate mirror prompt with automatic learning from previous interaction
+   * This is the main entry point for engagement-driven personality adaptation
+   */
+  generateMirrorPromptWithLearning(
+    recipientEntityId?: string,
+    options?: {
+      mirrorLevel?: number;
+      enableLearning?: boolean;
+      previousInteraction?: {
+        aiDraftLength: number;
+        userFinalLength: number;
+        sentiment?: number;
+        threadLength?: number;
+      };
+    }
+  ): ReturnType<typeof generateMirrorPromptWithLearning> {
+    this.ensureInitialized();
+    return generateMirrorPromptWithLearning(recipientEntityId, options);
+  }
+
+  /**
+   * Get learning statistics for monitoring engagement optimization
+   */
+  getLearningStats(): ReturnType<typeof getLearningStats> {
+    this.ensureInitialized();
+    return getLearningStats();
+  }
+
+  /**
    * Detect if user is in "vent mode" (emotionally venting)
    * During vent mode, personality adaptation is frozen
    */
@@ -721,6 +779,204 @@ export class PeanutCore {
     const edgeCount = (db.prepare('SELECT COUNT(*) as count FROM graph_edges').get() as { count: number }).count;
 
     return { entityCount, messageCount, assertionCount, edgeCount };
+  }
+
+  // ============================================================
+  // WORKERS & BACKGROUND PROCESSING
+  // ============================================================
+
+  /**
+   * Start the background processing worker
+   */
+  startProcessingWorker(config?: import('./workers/processor').WorkerConfig): void {
+    this.ensureInitialized();
+    const { startProcessingWorker } = require('./workers/processor');
+    startProcessingWorker(config);
+  }
+
+  /**
+   * Stop the background processing worker
+   */
+  stopProcessingWorker(): void {
+    const { stopProcessingWorker } = require('./workers/processor');
+    stopProcessingWorker();
+  }
+
+  /**
+   * Manually trigger a processing cycle
+   */
+  async triggerProcessingCycle(): Promise<import('./workers/processor').ProcessingResult> {
+    this.ensureInitialized();
+    const { triggerProcessingCycle } = require('./workers/processor');
+    return triggerProcessingCycle();
+  }
+
+  /**
+   * Start the proactive trigger service
+   */
+  startProactiveService(config?: import('./workers/proactive').ProactiveConfig): void {
+    this.ensureInitialized();
+    const { startProactiveService } = require('./workers/proactive');
+    startProactiveService(config);
+  }
+
+  /**
+   * Stop the proactive trigger service
+   */
+  stopProactiveService(): void {
+    const { stopProactiveService } = require('./workers/proactive');
+    stopProactiveService();
+  }
+
+  /**
+   * Get pending proactive triggers
+   */
+  getPendingTriggers(): import('./workers/proactive').ProactiveTrigger[] {
+    this.ensureInitialized();
+    const { getPendingTriggers } = require('./workers/proactive');
+    return getPendingTriggers();
+  }
+
+  // ============================================================
+  // ONBOARDING
+  // ============================================================
+
+  /**
+   * Run onboarding analysis after initial data sync
+   */
+  async runOnboarding(
+    config?: import('./onboarding/analysis').OnboardingConfig,
+    onProgress?: (progress: import('./onboarding/analysis').OnboardingProgress) => void
+  ): Promise<import('./onboarding/analysis').OnboardingResult> {
+    this.ensureInitialized();
+    const { runOnboardingAnalysis } = require('./onboarding/analysis');
+    return runOnboardingAnalysis(config, onProgress);
+  }
+
+  /**
+   * Check if onboarding is complete
+   */
+  isOnboardingComplete(): boolean {
+    this.ensureInitialized();
+    const { isOnboardingComplete } = require('./onboarding/analysis');
+    return isOnboardingComplete();
+  }
+
+  /**
+   * Get onboarding status
+   */
+  getOnboardingStatus(): import('./onboarding/analysis').OnboardingStatus {
+    this.ensureInitialized();
+    const { getOnboardingStatus } = require('./onboarding/analysis');
+    return getOnboardingStatus();
+  }
+
+  // ============================================================
+  // TEMPORAL QUERIES
+  // ============================================================
+
+  /**
+   * Get assertions as they were known at a specific point in time
+   */
+  getAssertionsAsOf(
+    entityId: string,
+    asOfDate: Date,
+    options?: { predicate?: string }
+  ): import('./assertions/temporal').TemporalAssertion[] {
+    this.ensureInitialized();
+    const { getAssertionsAsOf } = require('./assertions/temporal');
+    return getAssertionsAsOf(entityId, asOfDate, options);
+  }
+
+  /**
+   * Get entity state at a specific point in time
+   */
+  getEntityStateAsOf(entityId: string, asOfDate: Date): import('./assertions/temporal').EntitySnapshot | null {
+    this.ensureInitialized();
+    const { getEntityStateAsOf } = require('./assertions/temporal');
+    return getEntityStateAsOf(entityId, asOfDate);
+  }
+
+  /**
+   * Get entity change history
+   */
+  getEntityHistory(entityId: string, startDate: Date, endDate: Date): Array<{
+    type: 'added' | 'superseded' | 'attribute_added';
+    timestamp: Date;
+    description: string;
+    assertionId?: string;
+  }> {
+    this.ensureInitialized();
+    const { getEntityChanges } = require('./assertions/temporal');
+    return getEntityChanges(entityId, startDate, endDate);
+  }
+
+  // ============================================================
+  // SCREEN SEARCH
+  // ============================================================
+
+  /**
+   * Search screen captures
+   */
+  searchScreens(query: string, options?: {
+    limit?: number;
+    apps?: string[];
+    startDate?: Date;
+    endDate?: Date;
+  }): Array<{
+    id: string;
+    timestamp: Date;
+    app: string;
+    windowTitle: string;
+    ocrText: string;
+    relevanceScore: number;
+    highlights: string[];
+  }> {
+    this.ensureInitialized();
+    const { searchScreensFullText } = require('./integrations/screen');
+    return searchScreensFullText(query, options);
+  }
+
+  /**
+   * Get screen captures that mention a specific entity
+   */
+  getScreensForEntity(entityId: string, options?: {
+    limit?: number;
+    startDate?: Date;
+    endDate?: Date;
+  }): Array<{
+    id: string;
+    timestamp: Date;
+    app: string;
+    windowTitle: string;
+    ocrText: string;
+    matchedText: string;
+  }> {
+    this.ensureInitialized();
+    const { getScreensForEntity } = require('./integrations/screen');
+    return getScreensForEntity(entityId, options);
+  }
+
+  // ============================================================
+  // CALENDAR & CONTACTS INGESTION
+  // ============================================================
+
+  /**
+   * Ingest calendar events
+   */
+  ingestCalendarEvents(events: import('./ingestion/calendar').CalendarEventInput[]): import('./ingestion/calendar').BatchCalendarIngestResult {
+    this.ensureInitialized();
+    const { ingestCalendarBatch } = require('./ingestion/calendar');
+    return ingestCalendarBatch(events);
+  }
+
+  /**
+   * Ingest contacts
+   */
+  ingestContacts(contacts: import('./ingestion/contacts').ContactInput[]): import('./ingestion/contacts').BatchContactIngestResult {
+    this.ensureInitialized();
+    const { ingestContactBatch } = require('./ingestion/contacts');
+    return ingestContactBatch(contacts);
   }
 }
 

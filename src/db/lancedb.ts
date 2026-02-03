@@ -68,15 +68,16 @@ export async function initLanceDb(vectorDbPath: string): Promise<void> {
   }
 
   try {
-    // Dynamic import to handle missing package gracefully
-    const lancedb = await import('vectordb');
+    // Dynamic require to handle missing package gracefully
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const lancedb: any = require('vectordb');
     db = await lancedb.connect(vectorDbPath) as unknown as LanceDBConnection;
 
     // Check if table exists
     const tables = await db!.tableNames();
     if (tables.includes(TABLE_NAME)) {
       table = await db!.openTable(TABLE_NAME);
-      console.log(`LanceDB: Opened existing table '${TABLE_NAME}'`);
+      console.log(`✅ LanceDB: Opened existing table '${TABLE_NAME}'`);
     } else {
       // Create table with initial dummy record (required by LanceDB)
       const dummyRecord: VectorRecord = {
@@ -89,13 +90,18 @@ export async function initLanceDb(vectorDbPath: string): Promise<void> {
       table = await db!.createTable(TABLE_NAME, [dummyRecord]);
       // Remove dummy record
       await table.delete("id = '__init__'");
-      console.log(`LanceDB: Created new table '${TABLE_NAME}'`);
+      console.log(`✅ LanceDB: Created new table '${TABLE_NAME}'`);
     }
 
     useFallback = false;
   } catch (error) {
-    console.warn('LanceDB not available, using in-memory fallback:', error);
+    console.warn('⚠️  LanceDB not available (vectordb not installed)');
+    console.warn('   Using in-memory fallback for vector search');
+    console.warn('   Install with: npm install vectordb');
+    console.warn('   Tests will continue without vector search features.\n');
     useFallback = true;
+    db = null;
+    table = null;
   }
 }
 

@@ -10,6 +10,9 @@
     "test": "vitest",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:e2e": "npx ts-node scripts/test-system.ts",
+    "test:learning": "npx ts-node scripts/test-learning-loop.ts",
+    "test:manual": "npx ts-node scripts/test-manual.ts",
     "lint": "eslint src --ext .ts",
     "seed": "npx ts-node scripts/seed-test-data.ts",
     "migrate": "npx ts-node src/db/migrate.ts",
@@ -17,7 +20,8 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "vectordb": "^0.4.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",

@@ -7,6 +7,84 @@ import type { GmailMessage, IMessageMessage, BatchIngestResult } from './types';
 import { normalizeGmailBatch } from './gmail';
 import { normalizeIMessageBatch } from './imessage';
 
+// ============================================================
+// EVENT CREATION
+// ============================================================
+
+/**
+ * Create an event for a message (MESSAGE_SENT or MESSAGE_RECEIVED)
+ */
+function createMessageEvent(
+  message: NormalizedMessage,
+  senderEntityId: string | undefined,
+  recipientEntityIds: string[]
+): void {
+  const db = getDb();
+  const eventType = message.isFromUser ? 'MESSAGE_SENT' : 'MESSAGE_RECEIVED';
+
+  // Detect context type from subject/content
+  const contextType = detectContextType(message.subject || '', message.bodyText);
+
+  // Combine entity IDs
+  const entityIds = [...recipientEntityIds];
+  if (senderEntityId) {
+    entityIds.push(senderEntityId);
+  }
+
+  db.prepare(`
+    INSERT INTO events (
+      id, event_type, timestamp, payload, context_type, entities, processed
+    ) VALUES (?, ?, ?, ?, ?, ?, 0)
+  `).run(
+    uuidv4(),
+    eventType,
+    message.timestamp.toISOString(),
+    JSON.stringify({
+      messageId: message.id,
+      sourceType: message.sourceType,
+      threadId: message.threadId,
+      subject: message.subject,
+    }),
+    contextType,
+    JSON.stringify(entityIds),
+  );
+}
+
+/**
+ * Detect context type from message content
+ */
+function detectContextType(subject: string, body: string): 'work' | 'personal' | 'unknown' {
+  const text = (subject + ' ' + body).toLowerCase();
+
+  const workIndicators = [
+    'meeting', 'project', 'deadline', 'report', 'review',
+    'sprint', 'standup', 'invoice', 'proposal', 'contract',
+    'quarterly', 'budget', 'client', 'deliverable', 'milestone',
+    '@company', 'team', 'department', 'manager', 'ceo', 'cto',
+  ];
+
+  const personalIndicators = [
+    'birthday', 'party', 'dinner', 'lunch', 'weekend',
+    'vacation', 'holiday', 'family', 'kids', 'love',
+    'congratulations', 'wedding', 'baby', 'anniversary',
+  ];
+
+  let workScore = 0;
+  let personalScore = 0;
+
+  for (const indicator of workIndicators) {
+    if (text.includes(indicator)) workScore++;
+  }
+
+  for (const indicator of personalIndicators) {
+    if (text.includes(indicator)) personalScore++;
+  }
+
+  if (workScore > personalScore) return 'work';
+  if (personalScore > workScore) return 'personal';
+  return 'unknown';
+}
+
 /**
  * Find or create an entity from an identifier (email or phone)
  */
@@ -166,6 +244,9 @@ export function storeMessage(message: NormalizedMessage): {
       }
     }
   }
+
+  // Create event for the message (Event Log as Spine pattern)
+  createMessageEvent(message, senderEntityId, recipientEntityIds);
 
   return {
     stored: true,

@@ -3,6 +3,16 @@
 import { getDb } from '../db/connection';
 import type { StyleProfile, RecipientStyleProfile } from '../types';
 import { analyzeUserStyle, analyzeRecipientStyle } from './extractor';
+import { 
+  calculateEngagementScore, 
+  recordDraftEdited,
+  type EngagementSignal 
+} from '../engagement/tracker';
+import { 
+  applyAdaptation,
+  detectVentMode,
+  calculateLearningRate 
+} from '../engagement/adaptation';
 
 /**
  * Blend two style profiles based on mirror level
@@ -281,4 +291,224 @@ export function analyzeAllRecipients(): number {
   }
 
   return analyzed;
+}
+
+// ============================================================
+// ENGAGEMENT-DRIVEN ADAPTATION (Part 16: Integration)
+// ============================================================
+
+/**
+ * Learn from user interaction with AI draft
+ * This closes the engagement optimization loop from Part 16 of strategy
+ * 
+ * Call this after user edits a draft or responds to AI message
+ */
+export function learnFromInteraction(params: {
+  recipientEntityId?: string;
+  contextType?: 'work' | 'personal';
+  aiDraftLength: number;
+  userFinalLength: number;
+  userResponseSentiment?: number;
+  threadLength?: number;
+  threadContinued?: boolean;
+}): {
+  learningApplied: boolean;
+  reason?: string;
+  engagementScore?: number;
+  adaptations?: Array<{ dimension: string; change: number }>;
+} {
+  // Build engagement signal
+  const editRatio = params.aiDraftLength > 0
+    ? Math.abs(params.userFinalLength - params.aiDraftLength) / params.aiDraftLength
+    : 0;
+
+  const signal: EngagementSignal = {
+    draftId: '', // Not needed for learning
+    recipientEntityId: params.recipientEntityId,
+    contextType: params.contextType,
+    aiDraftLength: params.aiDraftLength,
+    userFinalLength: params.userFinalLength,
+    editRatio,
+    userResponseSentiment: params.userResponseSentiment,
+    threadLength: params.threadLength,
+    threadContinued: params.threadContinued,
+  };
+
+  // Check for vent mode first
+  if (params.userResponseSentiment !== undefined) {
+    const ventCheck = detectVentMode(
+      params.userResponseSentiment,
+      params.threadLength ?? 0
+    );
+
+    if (ventCheck.isVenting) {
+      return {
+        learningApplied: false,
+        reason: `Vent mode detected: ${ventCheck.signals.join(', ')}. Learning frozen to prevent model corruption.`,
+      };
+    }
+  }
+
+  // Calculate engagement score
+  const engagement = calculateEngagementScore(signal);
+
+  // Only learn if engagement is significantly different from neutral (0.5)
+  // and we have sufficient signal confidence
+  if (engagement.confidence < 0.3) {
+    return {
+      learningApplied: false,
+      reason: 'Insufficient signal confidence for learning',
+      engagementScore: engagement.overall,
+    };
+  }
+
+  // Apply adaptation
+  const adaptation = applyAdaptation(signal, {
+    checkVentMode: true,
+    sessionEngagement: engagement.overall,
+  });
+
+  // Also record the edit for tracking
+  if (editRatio > 0) {
+    recordDraftEdited('', params.userFinalLength, params.aiDraftLength);
+  }
+
+  return {
+    learningApplied: adaptation.applied,
+    reason: adaptation.reason,
+    engagementScore: engagement.overall,
+    adaptations: adaptation.changes.map(c => ({
+      dimension: c.dimension,
+      change: c.delta,
+    })),
+  };
+}
+
+/**
+ * Generate mirror prompt with automatic learning enabled
+ * 
+ * This is the main entry point that combines prompt generation
+ * with engagement-driven adaptation (Part 16, Phase 4)
+ */
+export function generateMirrorPromptWithLearning(
+  recipientEntityId?: string,
+  options: {
+    mirrorLevel?: number;
+    enableLearning?: boolean;
+    previousInteraction?: {
+      aiDraftLength: number;
+      userFinalLength: number;
+      sentiment?: number;
+      threadLength?: number;
+    };
+  } = {}
+): {
+  prompt: string;
+  learningResult?: ReturnType<typeof learnFromInteraction>;
+} {
+  // If we have previous interaction data, learn from it first
+  let learningResult: ReturnType<typeof learnFromInteraction> | undefined;
+
+  if (options.enableLearning && options.previousInteraction) {
+    const db = getDb();
+    
+    // Get current interaction count to determine if learning is worthwhile
+    const stats = db.prepare(`
+      SELECT interaction_count FROM user_style WHERE id = 'default'
+    `).get() as { interaction_count: number } | undefined;
+
+    const interactionCount = stats?.interaction_count ?? 0;
+
+    // Only learn after we have some baseline (10+ interactions)
+    // This prevents early noise from corrupting the model
+    if (interactionCount >= 10) {
+      learningResult = learnFromInteraction({
+        recipientEntityId,
+        contextType: undefined, // Could be inferred from recipient
+        aiDraftLength: options.previousInteraction.aiDraftLength,
+        userFinalLength: options.previousInteraction.userFinalLength,
+        userResponseSentiment: options.previousInteraction.sentiment,
+        threadLength: options.previousInteraction.threadLength,
+      });
+    }
+  }
+
+  // Generate prompt with (potentially updated) style
+  const prompt = generateMirrorPrompt(
+    recipientEntityId,
+    options.mirrorLevel ?? 0.7
+  );
+
+  return {
+    prompt,
+    learningResult,
+  };
+}
+
+/**
+ * Get learning statistics for monitoring
+ */
+export function getLearningStats(): {
+  totalInteractions: number;
+  currentLearningRate: number;
+  averageEngagement: number;
+  recentAdaptations: Array<{
+    dimension: string;
+    oldValue: number;
+    newValue: number;
+    timestamp: Date;
+  }>;
+  ventModeTriggered: number;
+} {
+  const db = getDb();
+
+  // Get interaction count and learning rate
+  const userStyle = db.prepare(`
+    SELECT interaction_count FROM user_style WHERE id = 'default'
+  `).get() as { interaction_count: number } | undefined;
+
+  const totalInteractions = userStyle?.interaction_count ?? 0;
+  const currentLearningRate = calculateLearningRate(totalInteractions);
+
+  // Get average engagement from recent drafts
+  const engagementStats = db.prepare(`
+    SELECT AVG(1 - COALESCE(edit_ratio, 0.5)) as avg_engagement
+    FROM engagement_events
+    WHERE interaction_type = 'draft_edited'
+      AND timestamp > datetime('now', '-30 days')
+  `).get() as { avg_engagement: number | null };
+
+  // Get recent adaptations from personality_evolution
+  const adaptations = db.prepare(`
+    SELECT dimension, old_value, new_value, timestamp
+    FROM personality_evolution
+    ORDER BY timestamp DESC
+    LIMIT 10
+  `).all() as Array<{
+    dimension: string;
+    old_value: number;
+    new_value: number;
+    timestamp: string;
+  }>;
+
+  // Count vent mode triggers
+  const ventCount = db.prepare(`
+    SELECT COUNT(*) as count
+    FROM engagement_events
+    WHERE interaction_type = 'vent_mode_detected'
+      AND timestamp > datetime('now', '-30 days')
+  `).get() as { count: number };
+
+  return {
+    totalInteractions,
+    currentLearningRate,
+    averageEngagement: engagementStats.avg_engagement ?? 0.5,
+    recentAdaptations: adaptations.map(a => ({
+      dimension: a.dimension,
+      oldValue: a.old_value,
+      newValue: a.new_value,
+      timestamp: new Date(a.timestamp),
+    })),
+    ventModeTriggered: ventCount.count,
+  };
 }
